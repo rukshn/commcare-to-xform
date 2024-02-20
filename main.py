@@ -3,6 +3,11 @@ import pandas as pd
 import re
 import time
 
+params = {
+    "lang": "en",
+}
+
+lookup_table_df = pd.DataFrame()
 
 # create empty dataframe with column names type, name, label, hint, constraint, constraint_message, required, default, relevant, calculation, choice_filter, appearance and media
 df = pd.DataFrame(
@@ -38,6 +43,25 @@ with open("./input/cht.xml", "r") as file:
 soup = BeautifulSoup(xml, "xml")
 
 globe_parents = []
+
+
+def loadLookupTables():
+    global lookup_table_df
+    lookup_table = pd.read_excel("./input/lookupTable.xlsx", sheet_name=None)
+
+    dfs_with_sheet_names = []
+
+    for sheet, df in lookup_table.items():
+        df["sheet"] = sheet
+        dfs_with_sheet_names.append(df)
+
+    lookup_table_df = pd.concat(dfs_with_sheet_names, ignore_index=True)
+
+
+def extract_lookup_table_data(sheetName):
+    global lookup_table_df
+    sheet_data = lookup_table_df.loc[lookup_table_df["sheet"] == sheetName]
+    return sheet_data
 
 
 def get_label_value(text_id):
@@ -80,7 +104,7 @@ def traverse(t, current_path=None):
                 if len(parents) > 0:
                     node_name = parents[-1], "_", current_path[-1]
                 else:
-                    node_name = current_path[-1]
+                    node_name = "data_" + current_path[-1]
 
                 parents.append(current_path[-1])
                 globe_parents.append(current_path[-1])
@@ -138,7 +162,7 @@ def traverse(t, current_path=None):
             df = df._append(
                 {
                     "type": "end_group",
-                    "name": tag.name,
+                    "name": "data_" + tag.name,
                     "label": tag.name,
                     "hint": "",
                     "constraint": "",
@@ -182,10 +206,12 @@ def parse_binds():
                 if reg.endswith(",") or reg.endswith(")"):
                     reg_filter = reg[1:-1]
                     reg_to_name = "_".join(reg_filter.split("/"))
+                    bind_relevant = bind_relevant.replace(reg, "${" + reg_to_name + "}")
+                    bind_relevant = bind_relevant + reg[-1]
                 else:
                     reg_filter = reg[1:]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                bind_relevant = bind_relevant.replace(reg, "${" + reg_to_name + "}")
+                    bind_relevant = bind_relevant.replace(reg, "${" + reg_to_name + "}")
             df.loc[df["name"] == nodeset, "relevant"] = bind_relevant
 
         # map constraints
@@ -197,6 +223,10 @@ def parse_binds():
                 if reg.endswith(",") or reg.endswith(")"):
                     reg_filter = reg[1:-1]
                     reg_to_name = "_".join(reg_filter.split("/"))
+                    bind_constratint = bind_constratint.replace(
+                        reg, "${" + reg_to_name + "}"
+                    )
+                    bind_constratint = bind_constratint + reg[-1]
                 else:
                     reg_filter = reg[1:]
                     reg_to_name = "_".join(reg_filter.split("/"))
@@ -214,10 +244,16 @@ def parse_binds():
                 if reg.endswith(",") or reg.endswith(")"):
                     reg_filter = reg[1:-1]
                     reg_to_name = "_".join(reg_filter.split("/"))
+                    bind_calculate = bind_calculate.replace(
+                        reg, "${" + reg_to_name + "}"
+                    )
+                    bind_calculate = bind_calculate + reg[-1]
                 else:
                     reg_filter = reg[1:]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                bind_calculate = bind_calculate.replace(reg, "${" + reg_to_name + "}")
+                    bind_calculate = bind_calculate.replace(
+                        reg, "${" + reg_to_name + "}"
+                    )
             df.loc[df["name"] == nodeset, "calculation"] = bind_calculate
 
         # map constraintMsg
@@ -232,9 +268,10 @@ def parse_binds():
         if required_message is not None:
             required_message = required_message.split("'")[1]
             required_message = get_label_value(required_message)
-            print(required_message)
 
         # map types
+        # currently this form has only these types, however there are more odk type
+        # this has to mapped with more xml files when available
         bind_type = bind.get("type")
         if bind_type is not None and "string" in bind_type:
             df.loc[df["name"] == nodeset, "type"] = "string"
@@ -265,7 +302,17 @@ def parse_body():
             tag_ref_to_name = "_".join(reg.split("/")[1:])
 
         if tag_name == "select1":
-            df.loc[df["name"] == tag_ref_to_name, "type"] = "select_one"
+            df.loc[df["name"] == tag_ref_to_name, "type"] = (
+                "select_one " + tag_ref_to_name
+            )
+
+            # parse itemset tags if available
+            itemset = tag.find("itemset")
+            if itemset is not None:
+                itemset_reference = itemset.get("nodeset")
+                # extract the instance name within the nodeset
+                print(itemset_reference)
+
             for child in tag.find_all("item"):
                 child_label = child.find("label").get("ref")
                 child_label = child_label.split("'")[1]
@@ -278,13 +325,55 @@ def parse_body():
                         "list_name": tag_ref_to_name,
                         "name": df_element_name,
                         "label": label_value,
-                        "value": value,
+                        # "value": value,
                     },
                     ignore_index=True,
                 )
 
         elif tag_name == "select":
-            df.loc[df["name"] == tag_ref_to_name, "type"] = "select_multiple"
+            df.loc[df["name"] == tag_ref_to_name, "type"] = (
+                "select_multiple " + tag_ref_to_name
+            )
+
+            # parse itemset tags if available
+            itemset = tag.find("itemset")
+            if itemset is not None:
+                itemset_reference = itemset.get("nodeset")
+                # extract the instance name within the nodeset
+                instance = re.search(r"'(.*?)'", itemset_reference)
+                instance = instance.group(1)
+                lookup_data = extract_lookup_table_data(instance)
+                fields = re.search(r"\[(.*?)\]", itemset_reference)
+                fields = fields.group(1).split(" ")
+
+                filtered_field_dataframe = pd.DataFrame()
+                refined_fields = []
+                for field in fields:
+                    if field.__contains__("/"):
+                        field = field.split("/")[-1]
+
+                    field = field.replace("/", "_")
+                    refined_fields.append("field: " + field)
+
+                valid_columns = list(
+                    set(refined_fields).intersection(lookup_data.columns)
+                )
+                filtered_field_dataframe = lookup_data[valid_columns]
+                print(filtered_field_dataframe)
+
+                df_choice = df_choice._append(
+                    {
+                        "list_name": tag_ref_to_name,
+                        "name": "select",
+                        "label": "select",
+                        "value": "select",
+                    },
+                    ignore_index=True,
+                )
+
+                # for data in lookup_data:
+                #     print(data)
+
             for child in tag.find_all("item"):
                 child_label = child.find("label").get("ref")
                 child_label = child_label.split("'")[1]
@@ -296,8 +385,7 @@ def parse_body():
                     {
                         "list_name": tag_ref_to_name,
                         "name": df_element_name,
-                        "label": label_value,
-                        "value": value,
+                        "label": label_value,  # "value": value,
                     },
                     ignore_index=True,
                 )
@@ -324,12 +412,14 @@ def fill_labels():
             text_value = text.find("value", form="markdown")
             if text_value is not None:
                 df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
+
             else:
                 text_value = text.find("value")
                 df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
 
 
-print(df.loc[df["name"].isNull()])
+loadLookupTables()
+print("lookup tables loaded")
 
 parseForm = build_form_structure()
 print("form structure generated")
@@ -341,3 +431,28 @@ parse_body()
 print("body parsed")
 fill_labels()
 print("labels filled")
+
+# currently this assumes that all non types are notes, but this may not be the case all the tie
+# but for this CHT form it works, maybe this can be improved in the future with more XML files and identifying more types
+missing_types = df.loc[df["type"].isna()]
+df["type"] = df["type"].fillna("note")
+print("completed")
+
+# remove labels from end_group
+df.loc[df["type"] == "end_group", "label"] = ""
+
+# remove appearence from end_group
+df.loc[df["type"] == "end_group", "appearance"] = ""
+
+# remove relevant from end_group
+df.loc[df["type"] == "end_group", "relevant"] = ""
+
+output_excel_file = "./cht.xlsx"
+
+df = df.drop(0)
+
+with pd.ExcelWriter(output_excel_file) as writer:
+    df.to_excel(writer, sheet_name="survey", index=False)
+    df_choice.to_excel(writer, sheet_name="choices", index=False)
+
+print("excel file generated")
