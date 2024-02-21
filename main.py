@@ -7,6 +7,19 @@ params = {
     "lang": "en",
 }
 
+
+class bcolors:
+    HEADER = "\033[95m"
+    OKBLUE = "\033[94m"
+    OKCYAN = "\033[96m"
+    OKGREEN = "\033[92m"
+    WARNING = "\033[93m"
+    FAIL = "\033[91m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    UNDERLINE = "\033[4m"
+
+
 lookup_table_df = pd.DataFrame()
 
 # create empty dataframe with column names type, name, label, hint, constraint, constraint_message, required, default, relevant, calculation, choice_filter, appearance and media
@@ -43,6 +56,15 @@ with open("./input/cht.xml", "r") as file:
 soup = BeautifulSoup(xml, "xml")
 
 globe_parents = []
+
+
+def check_nodeset_in_df(nodeset):
+    global df
+    check_nodeset = df.loc[df["name"] == nodeset]
+    if check_nodeset.empty:
+        return False
+    else:
+        return True
 
 
 def loadLookupTables():
@@ -201,59 +223,78 @@ def parse_binds():
         # map relevant
         if bind_relevant is not None:
             bind_relevant_regex = re.findall(r"\/[^\s=]+", bind_relevant)
+            bind_relevant_regex = sorted(bind_relevant_regex, key=len, reverse=True)
             for reg in bind_relevant_regex:
                 reg = reg.strip()
                 if reg.endswith(",") or reg.endswith(")"):
                     reg_filter = reg[1:-1]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                    bind_relevant = bind_relevant.replace(reg, "${" + reg_to_name + "}")
-                    bind_relevant = bind_relevant + reg[-1]
+                    if check_nodeset_in_df(reg_to_name):
+                        bind_relevant = bind_relevant.replace(
+                            reg, "${" + reg_to_name + "}" + reg[-1]
+                        )
+
                 else:
                     reg_filter = reg[1:]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                    bind_relevant = bind_relevant.replace(reg, "${" + reg_to_name + "}")
+                    if check_nodeset_in_df(reg_to_name):
+                        bind_relevant = bind_relevant.replace(
+                            reg, "${" + reg_to_name + "}"
+                        )
+
             df.loc[df["name"] == nodeset, "relevant"] = bind_relevant
 
         # map constraints
         bind_constratint = bind.get("constraint")
         if bind_constratint is not None:
             bind_constratint_regex = re.findall(r"\/[^\s=]+", bind_constratint)
+            bind_constratint_regex = sorted(
+                bind_constratint_regex, key=len, reverse=True
+            )
             for reg in bind_constratint_regex:
                 reg = reg.strip()
                 if reg.endswith(",") or reg.endswith(")"):
                     reg_filter = reg[1:-1]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                    bind_constratint = bind_constratint.replace(
-                        reg, "${" + reg_to_name + "}"
-                    )
-                    bind_constratint = bind_constratint + reg[-1]
+
+                    if check_nodeset_in_df(reg_to_name):
+                        bind_constratint = bind_constratint.replace(
+                            reg, "${" + reg_to_name + "}" + reg[-1]
+                        )
+
                 else:
                     reg_filter = reg[1:]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                bind_constratint = bind_constratint.replace(
-                    reg, "${" + reg_to_name + "}"
-                )
+                    if check_nodeset_in_df(reg_to_name):
+                        bind_constratint = bind_constratint.replace(
+                            reg, "${" + reg_to_name + "}"
+                        )
+
             df.loc[df["name"] == nodeset, "constraint"] = bind_constratint
 
         # map calculations
         bind_calculate = bind.get("calculate")
         if bind_calculate is not None:
             bind_calculate_regex = re.findall(r"\/[^\s=]+", bind_calculate)
+            bind_calculate_regex = sorted(bind_calculate_regex, key=len, reverse=True)
             for reg in bind_calculate_regex:
                 reg = reg.strip()
                 if reg.endswith(",") or reg.endswith(")"):
                     reg_filter = reg[1:-1]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                    bind_calculate = bind_calculate.replace(
-                        reg, "${" + reg_to_name + "}"
-                    )
-                    bind_calculate = bind_calculate + reg[-1]
+
+                    if check_nodeset_in_df(reg_to_name):
+                        bind_calculate = bind_calculate.replace(
+                            reg, "${" + reg_to_name + "}" + reg[-1]
+                        )
                 else:
                     reg_filter = reg[1:]
                     reg_to_name = "_".join(reg_filter.split("/"))
-                    bind_calculate = bind_calculate.replace(
-                        reg, "${" + reg_to_name + "}"
-                    )
+                    if check_nodeset_in_df(reg_to_name):
+                        bind_calculate = bind_calculate.replace(
+                            reg, "${" + reg_to_name + "}"
+                        )
+
             df.loc[df["name"] == nodeset, "calculation"] = bind_calculate
 
         # map constraintMsg
@@ -339,6 +380,7 @@ def parse_body():
             itemset = tag.find("itemset")
             if itemset is not None:
                 itemset_reference = itemset.get("nodeset")
+                print(itemset_reference)
                 # extract the instance name within the nodeset
                 instance = re.search(r"'(.*?)'", itemset_reference)
                 instance = instance.group(1)
@@ -347,7 +389,7 @@ def parse_body():
                 fields = fields.group(1).split(" ")
 
                 filtered_field_dataframe = pd.DataFrame()
-                refined_fields = []
+                refined_fields = ["field: value", "field: label 1"]
                 for field in fields:
                     if field.__contains__("/"):
                         field = field.split("/")[-1]
@@ -359,18 +401,31 @@ def parse_body():
                     set(refined_fields).intersection(lookup_data.columns)
                 )
                 filtered_field_dataframe = lookup_data[valid_columns]
-                print(filtered_field_dataframe)
+                filtered_field_dataframe = filtered_field_dataframe.copy()
+                filtered_field_dataframe.loc[:, "list_name"] = tag_ref_to_name
 
-                df_choice = df_choice._append(
-                    {
-                        "list_name": tag_ref_to_name,
-                        "name": "select",
-                        "label": "select",
-                        "value": "select",
-                    },
-                    ignore_index=True,
+                filtered_field_dataframe_columns = (
+                    filtered_field_dataframe.columns.tolist()
                 )
 
+                for column in filtered_field_dataframe_columns:
+                    column = column.strip()
+                    if ":" in column:
+                        column_post = column.split(":")[1]
+                        column_post = column_post.strip()
+                        filtered_field_dataframe = filtered_field_dataframe.rename(
+                            columns={column: column_post}
+                        )
+
+                filtered_field_dataframe = filtered_field_dataframe.rename(
+                    columns={"label 1": "label"}
+                )
+
+                print(filtered_field_dataframe)
+
+                df_choice = pd.concat(
+                    [df_choice, filtered_field_dataframe], ignore_index=True
+                )
                 # for data in lookup_data:
                 #     print(data)
 
@@ -454,5 +509,4 @@ df = df.drop(0)
 with pd.ExcelWriter(output_excel_file) as writer:
     df.to_excel(writer, sheet_name="survey", index=False)
     df_choice.to_excel(writer, sheet_name="choices", index=False)
-
 print("excel file generated")
