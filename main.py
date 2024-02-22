@@ -110,7 +110,7 @@ def generate_nested_if(conditions, results, default_result=""):
     xlsform_content += f"'{default_result}'"
 
     # Add closing parentheses for each nested if
-    for _ in range(len(conditions) - 1):
+    for _ in range(len(conditions)):
         xlsform_content += ")"
 
     return xlsform_content
@@ -119,66 +119,80 @@ def generate_nested_if(conditions, results, default_result=""):
 def parseInstance(instance):
     global lookup_table_df
     global df
-    # drop text beteeen ) and [
-    instance = re.sub(r"\)[^\]]*\[", ")[", instance)
-    # extract text beteen paranthesis
-    instance_items = re.search(r"\(\'(.*?)\'\)", instance)
-    # extact instance name
-    instance_name = instance_items.group(1).split(":")[1]
-    # extract instance key value pairs
-    instance_key_value = re.search(r"\[(.*?)\]", instance)
-    instance_key = instance_key_value.group(1).split("=")[0].strip()
-    instance_value = instance_key_value.group(1).split("=")[1].strip()
-    # get the instance y param
-    instance_y = instance.split("/")[-1].strip()
 
-    # extract the sheet from the lookup table
-    sheet_data = lookup_table_df.loc[lookup_table_df["sheet"] == instance_name]
-    # extract the column from the sheet_data
-    filter_sheet = sheet_data.loc[:, ["field: " + instance_key, "field: " + instance_y]]
+    instnace_bak = instance
+    instance = instance.strip()[8:]
+    if instance.endswith(")"):
+        instance = instance[:-1]
 
-    # extract the value inside paranthesis in the instance_value
-    instance_value_nodes = re.findall(r"\((.*?)\)", instance_value)
-    instance_value_nodes_parsed = [
-        "_".join(i[1:].split("/")) for i in instance_value_nodes
-    ]
+    try:
+        out_statement = ""
+        # drop text beteeen ) and [
+        instance = re.sub(r"\)[^\]]*\[", ")[", instance)
+        # extract text beteen paranthesis
+        instance_items = re.search(r"\(\'(.*?)\'\)", instance)
+        # extact instance name
+        instance_name = instance_items.group(1).split(":")[1]
+        # extract instance key value pairs
+        instance_key_value = re.search(r"\[(.*?)\]", instance)
+        instance_key = instance_key_value.group(1).split("=")[0].strip()
+        instance_value = instance_key_value.group(1).split("=")[1].strip()
+        # get the instance y param
+        instance_y = instance.split("/")[-1].strip()
 
-    # check if the instance_value_node is in the dataframe
-    for index, instance_value_node in enumerate(instance_value_nodes):
-        instance_value = instance_value.replace(
-            instance_value_node, "${" + instance_value_nodes_parsed[index] + "}"
-        )
+        # extract the sheet from the lookup table
+        sheet_data = lookup_table_df.loc[lookup_table_df["sheet"] == instance_name]
+        # extract the column from the sheet_data
+        filter_sheet = sheet_data.loc[
+            :, ["field: " + instance_key, "field: " + instance_y]
+        ]
 
-    conditions = []
-    results = []
+        # extract the value inside paranthesis in the instance_value
+        instance_value_nodes = re.findall(r"\((.*?)\)", instance_value)
+        instance_value_nodes_parsed = [
+            "_".join(i[1:].split("/")) for i in instance_value_nodes
+        ]
 
-    for index, row in sheet_data.iterrows():
-        key_value = row["field: " + instance_key]
-        if type(key_value) == float:
-            key_value = int(key_value)
-        instance_logic = instance_key_value.group(1).replace(
-            instance_key, "'" + str(key_value) + "'"
-        )
-
+        # check if the instance_value_node is in the dataframe
         for index, instance_value_node in enumerate(instance_value_nodes):
-            instance_logic = instance_logic.replace(
+            instance_value = instance_value.replace(
                 instance_value_node, "${" + instance_value_nodes_parsed[index] + "}"
             )
-            conditions.append(instance_logic)
 
-        results.append(row["field: " + instance_y])
+        conditions = []
+        results = []
 
-    if len(conditions) > 1:
-        print(conditions)
-        print(results)
-        nested_if_else_statement = generate_nested_if(
-            conditions, results, default_result=""
-        )
-        print(nested_if_else_statement)
+        for index, row in sheet_data.iterrows():
+            key_value = row["field: " + instance_key]
+            if type(key_value) == float:
+                key_value = int(key_value)
+            instance_logic = instance_key_value.group(1).replace(
+                instance_key, "'" + str(key_value) + "'"
+            )
 
-    print(
-        f"{bcolors.OKGREEN}instance name: {instance_name} {bcolors.ENDC} {bcolors.OKBLUE} instance key: {instance_key} {bcolors.ENDC} {bcolors.WARNING} instance value: {instance_value} {bcolors.ENDC} {bcolors.OKCYAN} instance y: {instance_y}{bcolors.ENDC}"
-    )
+            for index, instance_value_node in enumerate(instance_value_nodes):
+                instance_logic = instance_logic.replace(
+                    instance_value_node, "${" + instance_value_nodes_parsed[index] + "}"
+                )
+                conditions.append(instance_logic)
+
+            results.append(row["field: " + instance_y])
+
+        if len(conditions) > 1:
+            nested_if_else_statement = generate_nested_if(
+                conditions, results, default_result=""
+            )
+            out_statement = nested_if_else_statement
+        if len(conditions) == 1:
+            if_else_statement = generate_if_else(conditions[0], results[0], "")
+            out_statement = if_else_statement
+
+        return out_statement
+
+    except Exception as e:
+        print(e)
+        print(instance)
+        return instance
 
 
 def extract_lookup_table_data(sheetName):
@@ -377,9 +391,25 @@ def parse_binds():
         bind_calculate = bind.get("calculate")
         if bind_calculate is not None:
 
-            extrat_instance_tags = re.findall(r"instance(.*?),", bind_calculate)
-            for instance in extrat_instance_tags:
-                parseInstance(instance)
+            extract_instance_tags = bind_calculate.split(",")
+            for instance in extract_instance_tags:
+                instance_re = re.search(r"\binstance(.*?)(?:,|\))", instance)
+                if instance_re is not None:
+                    replace_instance_with_logic = parseInstance(instance)
+                    # print(f"{bcolors.OKBLUE}{bind_calculate}{bcolors.ENDC}")
+                    # print(
+                    #     f"{bcolors.OKCYAN}{replace_instance_with_logic}{bcolors.ENDC}"
+                    # )
+                    if instance.endswith(")"):
+                        bind_calculate = bind_calculate.replace(
+                            instance, replace_instance_with_logic + ")"
+                        )
+                    else:
+                        bind_calculate = bind_calculate.replace(
+                            instance, replace_instance_with_logic
+                        )
+                else:
+                    continue
 
             bind_calculate_regex = re.findall(r"\/[^\s=]+", bind_calculate)
             bind_calculate_regex = sorted(bind_calculate_regex, key=len, reverse=True)
