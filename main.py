@@ -80,6 +80,107 @@ def loadLookupTables():
     lookup_table_df = pd.concat(dfs_with_sheet_names, ignore_index=True)
 
 
+def generate_if_else(condition, truthValue, notTruthValue):
+    template = "if({condition}, '{true}', '{false}')"
+    return template.format(condition=condition, true=truthValue, false=notTruthValue)
+
+
+def generate_nested_if(conditions, results, default_result=""):
+    """
+    Generate a nested if statement in XLSForm format based on the provided conditions and results.
+
+    Parameters:
+    - conditions (list): List of conditions to check.
+    - results (list): List of results corresponding to each condition.
+    - default_result: Result to return if none of the conditions are true.
+
+    Returns:
+    - str: Generated XLSForm content.
+    """
+    if len(conditions) != len(results):
+        raise ValueError("Number of conditions must be equal to the number of results.")
+
+    xlsform_content = "if({condition}, '{true_result}', ".format(
+        condition=conditions[0], true_result=results[0]
+    )
+
+    for i, (condition, result) in enumerate(zip(conditions[1:], results[1:])):
+        xlsform_content += f"if({condition}, '{result}', "
+
+    xlsform_content += f"'{default_result}'"
+
+    # Add closing parentheses for each nested if
+    for _ in range(len(conditions) - 1):
+        xlsform_content += ")"
+
+    return xlsform_content
+
+
+def parseInstance(instance):
+    global lookup_table_df
+    global df
+    # drop text beteeen ) and [
+    instance = re.sub(r"\)[^\]]*\[", ")[", instance)
+    # extract text beteen paranthesis
+    instance_items = re.search(r"\(\'(.*?)\'\)", instance)
+    # extact instance name
+    instance_name = instance_items.group(1).split(":")[1]
+    # extract instance key value pairs
+    instance_key_value = re.search(r"\[(.*?)\]", instance)
+    instance_key = instance_key_value.group(1).split("=")[0].strip()
+    instance_value = instance_key_value.group(1).split("=")[1].strip()
+    # get the instance y param
+    instance_y = instance.split("/")[-1].strip()
+
+    # extract the sheet from the lookup table
+    sheet_data = lookup_table_df.loc[lookup_table_df["sheet"] == instance_name]
+    # extract the column from the sheet_data
+    filter_sheet = sheet_data.loc[:, ["field: " + instance_key, "field: " + instance_y]]
+
+    # extract the value inside paranthesis in the instance_value
+    instance_value_nodes = re.findall(r"\((.*?)\)", instance_value)
+    instance_value_nodes_parsed = [
+        "_".join(i[1:].split("/")) for i in instance_value_nodes
+    ]
+
+    # check if the instance_value_node is in the dataframe
+    for index, instance_value_node in enumerate(instance_value_nodes):
+        instance_value = instance_value.replace(
+            instance_value_node, "${" + instance_value_nodes_parsed[index] + "}"
+        )
+
+    conditions = []
+    results = []
+
+    for index, row in sheet_data.iterrows():
+        key_value = row["field: " + instance_key]
+        if type(key_value) == float:
+            key_value = int(key_value)
+        instance_logic = instance_key_value.group(1).replace(
+            instance_key, "'" + str(key_value) + "'"
+        )
+
+        for index, instance_value_node in enumerate(instance_value_nodes):
+            instance_logic = instance_logic.replace(
+                instance_value_node, "${" + instance_value_nodes_parsed[index] + "}"
+            )
+            conditions.append(instance_logic)
+
+        results.append(row["field: " + instance_y])
+
+    if len(conditions) > 1:
+        print(conditions)
+        print(results)
+        nested_if_else_statement = generate_nested_if(
+            conditions, results, default_result=""
+        )
+        print(nested_if_else_statement)
+
+    print(
+        f"{bcolors.OKGREEN}instance name: {instance_name} {bcolors.ENDC} {bcolors.OKBLUE} instance key: {instance_key} {bcolors.ENDC} {bcolors.WARNING} instance value: {instance_value} {bcolors.ENDC} {bcolors.OKCYAN} instance y: {instance_y}{bcolors.ENDC}"
+    )
+
+
 def extract_lookup_table_data(sheetName):
     global lookup_table_df
     sheet_data = lookup_table_df.loc[lookup_table_df["sheet"] == sheetName]
@@ -275,6 +376,11 @@ def parse_binds():
         # map calculations
         bind_calculate = bind.get("calculate")
         if bind_calculate is not None:
+
+            extrat_instance_tags = re.findall(r"instance(.*?),", bind_calculate)
+            for instance in extrat_instance_tags:
+                parseInstance(instance)
+
             bind_calculate_regex = re.findall(r"\/[^\s=]+", bind_calculate)
             bind_calculate_regex = sorted(bind_calculate_regex, key=len, reverse=True)
             for reg in bind_calculate_regex:
@@ -352,7 +458,6 @@ def parse_body():
             if itemset is not None:
                 itemset_reference = itemset.get("nodeset")
                 # extract the instance name within the nodeset
-                print(itemset_reference)
 
             for child in tag.find_all("item"):
                 child_label = child.find("label").get("ref")
@@ -380,7 +485,6 @@ def parse_body():
             itemset = tag.find("itemset")
             if itemset is not None:
                 itemset_reference = itemset.get("nodeset")
-                print(itemset_reference)
                 # extract the instance name within the nodeset
                 instance = re.search(r"'(.*?)'", itemset_reference)
                 instance = instance.group(1)
@@ -420,8 +524,6 @@ def parse_body():
                 filtered_field_dataframe = filtered_field_dataframe.rename(
                     columns={"label 1": "label"}
                 )
-
-                print(filtered_field_dataframe)
 
                 df_choice = pd.concat(
                     [df_choice, filtered_field_dataframe], ignore_index=True
