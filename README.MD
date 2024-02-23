@@ -6,6 +6,10 @@
 
 This script tries to convert a COMMCARE XML file to a XForm / XLSForm/ ODK - file (XLSX) file to be used in CHT (Community health toolkit file)
 
-### Usefull links 
+### Usefull links
 
 - CommCare form structure specification - https://dimagi.github.io/xform-spec/
+
+### Updates
+
+- First XLS to XLSX (Excel) was done on 22/02/2024 ⚛️
