@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import re
 import time
+from halo import Halo
 
 params = {
     "lang": "en",
@@ -40,6 +41,7 @@ df = pd.DataFrame(
         "media",
         "read_only",
         "node_set",
+        "has_label",
     ]
 )
 
@@ -588,6 +590,7 @@ def parse_body():
 
 def fill_labels():
     global df
+    df["has_label"] = False
     labels = soup.find("itext").find_all("translation", lang="en")
 
     for label in labels:
@@ -607,6 +610,7 @@ def fill_labels():
                         output_value_to_name = "_".join(output_tag_value.split("/")[1:])
                         output.replace_with("${" + output_value_to_name + "}")
                 df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
+                df.loc[df["name"] == text_id_to_name, "has_label"] = True
             else:
                 text_value = text.find("value")
                 output_tag = text_value.find_all("output")
@@ -616,27 +620,45 @@ def fill_labels():
                         output_value_to_name = "_".join(output_tag_value.split("/")[1:])
                         output.replace_with("${" + output_value_to_name + "}")
                 df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
+                df.loc[df["name"] == text_id_to_name, "has_label"] = True
 
+
+# refine function will do the final refines of the dataframe
+def refine():
+    global df
+    # change type of the dataframe to calculate if the label name has not changed
+    exclusion_condition = df["type"].str.contains("begin_group") | df[
+        "type"
+    ].str.contains("end_group")
+    inclusion_condition = df["has_label"] == False
+    df.loc[
+        ~exclusion_condition & inclusion_condition,
+        "type",
+    ] = "calculate"
+
+
+spinner = Halo(text="Loading", spinner="dots")
+spinner.start()
 
 loadLookupTables()
-print("lookup tables loaded")
-
+print(" >> lookup tables loaded")
 parseForm = build_form_structure()
-print("form structure generated")
+print(" >> form structure generated")
 traverse(parseForm)
-print("form structure traversed")
+print(" >> form structure traversed")
 parse_binds()
-print("binds parsed")
+print(" >> binds parsed")
 parse_body()
-print("body parsed")
+print(" >> body parsed")
 fill_labels()
-print("labels filled")
+print(" >> labels filled")
+refine()
+print(" >> refine dataframe")
 
 # currently this assumes that all non types are notes, but this may not be the case all the tie
 # but for this CHT form it works, maybe this can be improved in the future with more XML files and identifying more types
 missing_types = df.loc[df["type"].isna()]
 df["type"] = df["type"].fillna("note")
-print("completed")
 
 # remove labels from end_group
 df.loc[df["type"] == "end_group", "label"] = ""
@@ -654,4 +676,6 @@ df = df.drop(0)
 with pd.ExcelWriter(output_excel_file) as writer:
     df.to_excel(writer, sheet_name="survey", index=False)
     df_choice.to_excel(writer, sheet_name="choices", index=False)
-print("excel file generated")
+
+print(" >> excel file generated")
+spinner.stop()
