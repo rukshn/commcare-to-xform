@@ -592,16 +592,29 @@ def fill_labels():
 
     for label in labels:
         for text in label.find_all("text"):
+            text_content = text.contents
+
             text_id = text.get("id")
             text_id_regex = re.findall(r"\/[^\s=':)]+", text_id)
             text_id_to_name = "_".join(text_id_regex[0].split("/")[1:])
 
             text_value = text.find("value", form="markdown")
             if text_value is not None:
+                output_tag = text_value.find_all("output")
+                if output_tag is not None and len(output_tag) > 0:
+                    for output in output_tag:
+                        output_tag_value = output.get("value")
+                        output_value_to_name = "_".join(output_tag_value.split("/")[1:])
+                        output.replace_with("${" + output_value_to_name + "}")
                 df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
-
             else:
                 text_value = text.find("value")
+                output_tag = text_value.find_all("output")
+                if output_tag is not None and len(output_tag) > 0:
+                    for output in output_tag:
+                        output_tag_value = output.get("value")
+                        output_value_to_name = "_".join(output_tag_value.split("/")[1:])
+                        output.replace_with("${" + output_value_to_name + "}")
                 df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
 
 
