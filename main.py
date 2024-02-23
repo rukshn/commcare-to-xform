@@ -28,7 +28,6 @@ df = pd.DataFrame(
     columns=[
         "type",
         "name",
-        "label",
         "hint",
         "constraint",
         "constraint_message",
@@ -591,36 +590,49 @@ def parse_body():
 def fill_labels():
     global df
     df["has_label"] = False
-    labels = soup.find("itext").find_all("translation", lang="en")
+    translations = soup.find("itext").find_all("translation")
 
-    for label in labels:
-        for text in label.find_all("text"):
-            text_content = text.contents
+    for translation in translations:
+        translation_lang = translation.get("lang")
+        column_name = "label" + "::" + translation_lang
+        if column_name not in df.columns:
+            df[column_name] = None
 
-            text_id = text.get("id")
-            text_id_regex = re.findall(r"\/[^\s=':)]+", text_id)
-            text_id_to_name = "_".join(text_id_regex[0].split("/")[1:])
+            for text in translation.find_all("text"):
+                text_content = text.contents
 
-            text_value = text.find("value", form="markdown")
-            if text_value is not None:
-                output_tag = text_value.find_all("output")
-                if output_tag is not None and len(output_tag) > 0:
-                    for output in output_tag:
-                        output_tag_value = output.get("value")
-                        output_value_to_name = "_".join(output_tag_value.split("/")[1:])
-                        output.replace_with("${" + output_value_to_name + "}")
-                df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
-                df.loc[df["name"] == text_id_to_name, "has_label"] = True
-            else:
-                text_value = text.find("value")
-                output_tag = text_value.find_all("output")
-                if output_tag is not None and len(output_tag) > 0:
-                    for output in output_tag:
-                        output_tag_value = output.get("value")
-                        output_value_to_name = "_".join(output_tag_value.split("/")[1:])
-                        output.replace_with("${" + output_value_to_name + "}")
-                df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
-                df.loc[df["name"] == text_id_to_name, "has_label"] = True
+                text_id = text.get("id")
+                text_id_regex = re.findall(r"\/[^\s=':)]+", text_id)
+                text_id_to_name = "_".join(text_id_regex[0].split("/")[1:])
+
+                text_value = text.find("value", form="markdown")
+                if text_value is not None:
+                    output_tag = text_value.find_all("output")
+                    if output_tag is not None and len(output_tag) > 0:
+                        for output in output_tag:
+                            output_tag_value = output.get("value")
+                            output_value_to_name = "_".join(
+                                output_tag_value.split("/")[1:]
+                            )
+                            output.replace_with("${" + output_value_to_name + "}")
+                    df.loc[df["name"] == text_id_to_name, column_name] = (
+                        text_value.get_text()
+                    )
+                    df.loc[df["name"] == text_id_to_name, "has_label"] = True
+                else:
+                    text_value = text.find("value")
+                    output_tag = text_value.find_all("output")
+                    if output_tag is not None and len(output_tag) > 0:
+                        for output in output_tag:
+                            output_tag_value = output.get("value")
+                            output_value_to_name = "_".join(
+                                output_tag_value.split("/")[1:]
+                            )
+                            output.replace_with("${" + output_value_to_name + "}")
+                    df.loc[df["name"] == text_id_to_name, "label"] = (
+                        text_value.get_text()
+                    )
+                    df.loc[df["name"] == text_id_to_name, "has_label"] = True
 
 
 # refine function will do the final refines of the dataframe
