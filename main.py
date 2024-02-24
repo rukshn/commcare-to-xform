@@ -32,7 +32,7 @@ df = pd.DataFrame(
         "constraint",
         "required",
         "default",
-        "relevant",
+        "relevance",
         "calculation",
         "choice_filter",
         "appearance",
@@ -261,7 +261,7 @@ def traverse(t, current_path=None):
                         "constraint_message": "",
                         "required": "",
                         "default": "",
-                        "relevant": "",
+                        "relevance": "",
                         "calculation": "",
                         "choice_filter": "",
                         "appearance": "",
@@ -282,7 +282,7 @@ def traverse(t, current_path=None):
                     "constraint_message": "",
                     "required": "",
                     "default": "",
-                    "relevant": "",
+                    "relevance": "",
                     "calculation": "",
                     "choice_filter": "",
                     "appearance": "",
@@ -311,7 +311,7 @@ def traverse(t, current_path=None):
                     "constraint_message": "",
                     "required": "",
                     "default": "",
-                    "relevant": "",
+                    "relevance": "",
                     "calculation": "",
                     "choice_filter": "",
                     "appearance": "",
@@ -362,7 +362,7 @@ def parse_binds():
                             reg, "${" + reg_to_name + "}"
                         )
 
-            df.loc[df["name"] == nodeset, "relevant"] = bind_relevant
+            df.loc[df["name"] == nodeset, "relevance"] = bind_relevant
 
         # map constraints
         bind_constratint = bind.get("constraint")
@@ -676,7 +676,7 @@ df.loc[df["type"] == "end_group", "label"] = ""
 df.loc[df["type"] == "end_group", "appearance"] = ""
 
 # remove relevant from end_group
-df.loc[df["type"] == "end_group", "relevant"] = ""
+df.loc[df["type"] == "end_group", "relevance"] = ""
 
 output_excel_file = "./cht.xlsx"
 
