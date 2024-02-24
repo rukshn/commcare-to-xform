@@ -30,7 +30,6 @@ df = pd.DataFrame(
         "name",
         "hint",
         "constraint",
-        "constraint_message",
         "required",
         "default",
         "relevant",
@@ -203,15 +202,20 @@ def extract_lookup_table_data(sheetName):
 
 
 def get_label_value(text_id):
-    labels = soup.find("itext").find("translation", lang="en").find("text", id=text_id)
-    if labels is None:
-        return None
-    text_value = labels.find("value", form="markdown")
-    if text_value is not None:
-        return text_value.get_text()
-    else:
-        text_value = labels.find("value")
-        return text_value.get_text()
+    translations = soup.find("itext").find_all("translation")
+    output = {}
+    for translation in translations:
+        translation_lang = translation.get("lang")
+        labels = translation.find("text", id=text_id)
+        if labels is None:
+            text_value = None
+
+        elif labels.find("value", form="markdown") is not None:
+            text_value = labels.find("value", form="markdown").get_text()
+        else:
+            text_value = labels.find("value").get_text()
+        output[translation_lang] = text_value
+    return output
 
 
 def build_form_structure():
@@ -438,14 +442,18 @@ def parse_binds():
         constraint_message = bind.get("jr:constraintMsg")
         if constraint_message is not None:
             constraint_message = constraint_message.split("'")[1]
-            constraint_message = get_label_value(constraint_message)
-            df.loc[df["name"] == nodeset, "constraint_message"] = constraint_message
+            constraint_labels = get_label_value(constraint_message)
+            if constraint_labels is not None:
+                for lang, label in constraint_labels.items():
+                    df.loc[df["name"] == nodeset, "constraint_message::" + lang] = label
 
         # map requiredMsg
         required_message = bind.get("jr:requiredMsg")
         if required_message is not None:
             required_message = required_message.split("'")[1]
-            required_message = get_label_value(required_message)
+            required_message_labels = get_label_value(required_message)
+            for lang, label in required_message_labels.items():
+                df.loc[df["name"] == nodeset, "required_message::" + lang] = label
 
         # map types
         # currently this form has only these types, however there are more odk type
@@ -494,18 +502,15 @@ def parse_body():
                 child_label = child.find("label").get("ref")
                 child_label = child_label.split("'")[1]
                 df_element_name = child_label.split("/")[-1].split(":")[0]
-                label_value = get_label_value(child_label)
+                label_values = get_label_value(child_label)
 
-                value = child.find("value").get_text()
-                df_choice = df_choice._append(
-                    {
-                        "list_name": tag_ref_to_name,
-                        "name": df_element_name,
-                        "label": label_value,
-                        # "value": value,
-                    },
-                    ignore_index=True,
-                )
+                choice = {}
+                for lang, label in label_values.items():
+                    choice["label::" + lang] = label
+
+                choice["list_name"] = tag_ref_to_name
+                choice["name"] = df_element_name
+                df_choice = df_choice._append(choice, ignore_index=True)
 
         elif tag_name == "select":
             df.loc[df["name"] == tag_ref_to_name, "type"] = (
@@ -595,44 +600,36 @@ def fill_labels():
     for translation in translations:
         translation_lang = translation.get("lang")
         column_name = "label" + "::" + translation_lang
-        if column_name not in df.columns:
-            df[column_name] = None
 
-            for text in translation.find_all("text"):
-                text_content = text.contents
+        for text in translation.find_all("text"):
+            text_content = text.contents
 
-                text_id = text.get("id")
-                text_id_regex = re.findall(r"\/[^\s=':)]+", text_id)
-                text_id_to_name = "_".join(text_id_regex[0].split("/")[1:])
+            text_id = text.get("id")
+            text_id_regex = re.findall(r"\/[^\s=':)]+", text_id)
+            text_id_to_name = "_".join(text_id_regex[0].split("/")[1:])
 
-                text_value = text.find("value", form="markdown")
-                if text_value is not None:
-                    output_tag = text_value.find_all("output")
-                    if output_tag is not None and len(output_tag) > 0:
-                        for output in output_tag:
-                            output_tag_value = output.get("value")
-                            output_value_to_name = "_".join(
-                                output_tag_value.split("/")[1:]
-                            )
-                            output.replace_with("${" + output_value_to_name + "}")
-                    df.loc[df["name"] == text_id_to_name, column_name] = (
-                        text_value.get_text()
-                    )
-                    df.loc[df["name"] == text_id_to_name, "has_label"] = True
-                else:
-                    text_value = text.find("value")
-                    output_tag = text_value.find_all("output")
-                    if output_tag is not None and len(output_tag) > 0:
-                        for output in output_tag:
-                            output_tag_value = output.get("value")
-                            output_value_to_name = "_".join(
-                                output_tag_value.split("/")[1:]
-                            )
-                            output.replace_with("${" + output_value_to_name + "}")
-                    df.loc[df["name"] == text_id_to_name, "label"] = (
-                        text_value.get_text()
-                    )
-                    df.loc[df["name"] == text_id_to_name, "has_label"] = True
+            text_value = text.find("value", form="markdown")
+            if text_value is not None:
+                output_tag = text_value.find_all("output")
+                if output_tag is not None and len(output_tag) > 0:
+                    for output in output_tag:
+                        output_tag_value = output.get("value")
+                        output_value_to_name = "_".join(output_tag_value.split("/")[1:])
+                        output.replace_with("${" + output_value_to_name + "}")
+                df.loc[df["name"] == text_id_to_name, column_name] = (
+                    text_value.get_text()
+                )
+                df.loc[df["name"] == text_id_to_name, "has_label"] = True
+            else:
+                text_value = text.find("value")
+                output_tag = text_value.find_all("output")
+                if output_tag is not None and len(output_tag) > 0:
+                    for output in output_tag:
+                        output_tag_value = output.get("value")
+                        output_value_to_name = "_".join(output_tag_value.split("/")[1:])
+                        output.replace_with("${" + output_value_to_name + "}")
+                df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
+                df.loc[df["name"] == text_id_to_name, "has_label"] = True
 
 
 # refine function will do the final refines of the dataframe
