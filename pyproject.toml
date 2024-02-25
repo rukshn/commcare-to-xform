@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=63.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xml-to-xlsx"                                             # Replace with your project name
+version = "0.0.1"                                                # Replace with your desired version
+description = "Convert XForm XML files to XLSX form Excel files" # Add a description
+
+[dependencies]
+beautifulsoup4 = "==4.12.3"
+colorama = "==0.4.6"
+et-xmlfile = "==1.1.0"
+halo = "==0.0.31"
+log-symbols = "==0.0.14"
+lxml = "==5.1.0"
+numpy = "==1.26.4"
+openpyxl = "==3.1.2"
+pandas = "==2.2.1"
+python-dateutil = "==2.8.2"
+pytz = "==2024.1"
+six = "==1.16.0"
+soupsieve = "==2.5"
+spinners = "==0.0.24"
+termcolor = "==2.4.0"
+tzdata = "==2024.1"
