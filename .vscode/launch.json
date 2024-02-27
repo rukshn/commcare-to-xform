@@ -7,9 +7,16 @@
     {
       "type": "python",
       "request": "launch",
-      "name": "Launch",
-      "program": "${file}"
+      "name": "Parse pre-lab file",
+      "program": "${file}",
+      "args": ["-i", "./input/cht.xml", "-o", "./output/cht.xlsx"]
+    },
+    {
+      "type": "python",
+      "request": "launch",
+      "name": "Process post-lab file",
+      "program": "${file}",
+      "args": ["-i", "./input/postlab.xml", "-o", "./output/postlab.xlsx"]
     }
-  ],
-  "inputs": []
+  ]
 }

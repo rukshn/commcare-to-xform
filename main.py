@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import time
 from halo import Halo
+import argparse
 
 params = {
     "lang": "en",
@@ -22,6 +23,9 @@ class bcolors:
 
 
 lookup_table_df = pd.DataFrame()
+
+globe_parents = []
+soup = None
 
 # create empty dataframe with column names type, name, label, hint, constraint, constraint_message, required, default, relevant, calculation, choice_filter, appearance and media
 df = pd.DataFrame(
@@ -43,21 +47,11 @@ df = pd.DataFrame(
     ]
 )
 
-df_choice = pd.DataFrame(
-    columns=["list_name", "name", "label", "value", "media", "read_only"]
-)
-
-# read the xml file and populate variable
-xml = ""
-with open("./input/cht.xml", "r") as file:
-    xml = file.read()
-
-# parse the xml file
-soup = BeautifulSoup(xml, "xml")
-
-globe_parents = []
+df_choice = pd.DataFrame(columns=["list_name", "name", "value", "media", "read_only"])
 
 
+# check if the nodeset is in the dataframe
+# if it is return true else return false
 def check_nodeset_in_df(nodeset):
     global df
     check_nodeset = df.loc[df["name"] == nodeset]
@@ -67,6 +61,9 @@ def check_nodeset_in_df(nodeset):
         return True
 
 
+# load lookup tables from the lookupTable.xlsx file
+# this will be used to map the instance tags in the xml file
+# to the lookup table
 def loadLookupTables():
     global lookup_table_df
     lookup_table = pd.read_excel("./input/lookupTable.xlsx", sheet_name=None)
@@ -80,6 +77,10 @@ def loadLookupTables():
     lookup_table_df = pd.concat(dfs_with_sheet_names, ignore_index=True)
 
 
+# generate if else statement in XLSForm format
+# based on the provided conditions and results
+# if the condition is true return the truthValue
+# else return the notTruthValue
 def generate_if_else(condition, truthValue, notTruthValue):
     template = "if({condition}, '{true}', '{false}')"
     return template.format(condition=condition, true=truthValue, false=notTruthValue)
@@ -116,12 +117,20 @@ def generate_nested_if(conditions, results, default_result=""):
     return xlsform_content
 
 
+"""
+parseInstance function will parse the instance tags in the xml file
+and map them to the lookup table
+"""
+
+
 def parseInstance(instance):
     global lookup_table_df
     global df
 
+    # remove the instance tag
     instnace_bak = instance
     instance = instance.strip()[8:]
+    # remove the last paranthesis
     if instance.endswith(")"):
         instance = instance[:-1]
 
@@ -149,6 +158,7 @@ def parseInstance(instance):
 
         # extract the value inside paranthesis in the instance_value
         instance_value_nodes = re.findall(r"\((.*?)\)", instance_value)
+        # replace / with _
         instance_value_nodes_parsed = [
             "_".join(i[1:].split("/")) for i in instance_value_nodes
         ]
@@ -162,10 +172,15 @@ def parseInstance(instance):
         conditions = []
         results = []
 
+        # iterate through the sheet_data and generate the conditions and results
         for index, row in sheet_data.iterrows():
             key_value = row["field: " + instance_key]
+
+            # check if the key_value is a float
+            # if it is convert it to int
             if type(key_value) == float:
                 key_value = int(key_value)
+
             instance_logic = instance_key_value.group(1).replace(
                 instance_key, "'" + str(key_value) + "'"
             )
@@ -190,15 +205,25 @@ def parseInstance(instance):
         return out_statement
 
     except Exception as e:
-        print(e)
-        print(instance)
+        print(f"{bcolors.WARNING} WARNING: {e} {bcolors.ENDC}")
         return instance
+
+
+"""
+extract_lookup_table_data function will extract the lookup table data
+from the lookup table dataframe 
+"""
 
 
 def extract_lookup_table_data(sheetName):
     global lookup_table_df
     sheet_data = lookup_table_df.loc[lookup_table_df["sheet"] == sheetName]
     return sheet_data
+
+
+"""
+get_label_value function will extract the label value from the xml file 
+"""
 
 
 def get_label_value(text_id):
@@ -218,15 +243,22 @@ def get_label_value(text_id):
     return output
 
 
+"""
+build_form_structure function will extract the form structure from the xml file
+"""
+
+
 def build_form_structure():
     global df
     # find the form structure
-    formStructure = soup.find(
-        "data",
-        xmlns="http://openrosa.org/formdesigner/466B8B00-76BA-482F-A396-35BD6F0767DB",
-    )
+    formStructure = soup.find("instance").find("data")
 
     return formStructure
+
+
+"""
+traverse function will traverse the form structure and generate the dataframe
+"""
 
 
 def traverse(t, current_path=None):
@@ -327,8 +359,6 @@ def traverse(t, current_path=None):
 # nodes = build_form_structure()
 # traverse(nodes)
 # print("dataframe generated")
-
-
 def parse_binds():
     global df
     binds = soup.find_all("bind")
@@ -412,6 +442,10 @@ def parse_binds():
                     else:
                         bind_calculate = bind_calculate.replace(
                             instance, replace_instance_with_logic
+                        )
+                    if "commcare" in instance:
+                        print(
+                            f"{bcolors.WARNING}Possible commcare header: {instance}{bcolors.ENDC}"
                         )
                 else:
                     continue
@@ -573,15 +607,16 @@ def parse_body():
                 df_element_name = child_label.split("/")[-1].split(":")[0]
                 label_value = get_label_value(child_label)
 
-                value = child.find("value").get_text()
-                df_choice = df_choice._append(
-                    {
-                        "list_name": tag_ref_to_name,
-                        "name": df_element_name,
-                        "label": label_value,  # "value": value,
-                    },
-                    ignore_index=True,
-                )
+                choice = {}
+
+                for lang, label in label_value.items():
+                    choice["label::" + lang] = label
+
+                choice["list_name"] = tag_ref_to_name
+                choice["name"] = df_element_name
+
+                # value = child.find("value").get_text()
+                df_choice = df_choice._append(choice, ignore_index=True)
         # df.loc[df["name"] == tag_ref_to_name, "type"] = odk_type
 
         if tag_appearance == "field-list":
@@ -592,6 +627,7 @@ def parse_body():
             df.loc[df["name"] == tag_ref_to_name, "appearance"] = tag_appearance
 
 
+# fill_labels function will fill the labels in the dataframe
 def fill_labels():
     global df
     df["has_label"] = False
@@ -628,7 +664,9 @@ def fill_labels():
                         output_tag_value = output.get("value")
                         output_value_to_name = "_".join(output_tag_value.split("/")[1:])
                         output.replace_with("${" + output_value_to_name + "}")
-                df.loc[df["name"] == text_id_to_name, "label"] = text_value.get_text()
+                df.loc[df["name"] == text_id_to_name, column_name] = (
+                    text_value.get_text()
+                )
                 df.loc[df["name"] == text_id_to_name, "has_label"] = True
 
 
@@ -646,45 +684,78 @@ def refine():
     ] = "calculate"
 
 
-spinner = Halo(text="Loading", spinner="dots")
-spinner.start()
+def main():
+    global df
+    global soup
+    parser = argparse.ArgumentParser(description="Convert CHT XML to XLSForm")
+    parser.add_argument(
+        "--input", "-i", type=str, required=True, help="Input file path"
+    )
+    parser.add_argument(
+        "--output", "-o", type=str, required=True, help="Output file path"
+    )
 
-loadLookupTables()
-print(" >> lookup tables loaded")
-parseForm = build_form_structure()
-print(" >> form structure generated")
-traverse(parseForm)
-print(" >> form structure traversed")
-parse_binds()
-print(" >> binds parsed")
-parse_body()
-print(" >> body parsed")
-fill_labels()
-print(" >> labels filled")
-refine()
-print(" >> refine dataframe")
+    args = parser.parse_args()
 
-# currently this assumes that all non types are notes, but this may not be the case all the tie
-# but for this CHT form it works, maybe this can be improved in the future with more XML files and identifying more types
-missing_types = df.loc[df["type"].isna()]
-df["type"] = df["type"].fillna("note")
+    input_file = args.input
+    output_file = args.output
 
-# remove labels from end_group
-df.loc[df["type"] == "end_group", "label"] = ""
+    if (input_file is None) or (output_file is None):
+        print(
+            f"{bcolors.FAIL} ERROR: Please provide input and output file paths {bcolors.ENDC}"
+        )
+        return
 
-# remove appearence from end_group
-df.loc[df["type"] == "end_group", "appearance"] = ""
+    # read the xml file and populate variable
+    xml = ""
+    with open(input_file, "r") as file:
+        xml = file.read()
 
-# remove relevant from end_group
-df.loc[df["type"] == "end_group", "relevance"] = ""
+    # parse the xml file
+    soup = BeautifulSoup(xml, "xml")
 
-output_excel_file = "./cht.xlsx"
+    spinner = Halo(text="Loading", spinner="dots")
+    spinner.start()
 
-df = df.drop(0)
+    loadLookupTables()
+    print(" >> lookup tables loaded")
+    parseForm = build_form_structure()
+    print(" >> form structure generated")
+    traverse(parseForm)
+    print(" >> form structure traversed")
+    parse_binds()
+    print(" >> binds parsed")
+    parse_body()
+    print(" >> body parsed")
+    fill_labels()
+    print(" >> labels filled")
+    refine()
+    print(" >> refine dataframe")
 
-with pd.ExcelWriter(output_excel_file) as writer:
-    df.to_excel(writer, sheet_name="survey", index=False)
-    df_choice.to_excel(writer, sheet_name="choices", index=False)
+    # currently this assumes that all non types are notes, but this may not be the case all the tie
+    # but for this CHT form it works, maybe this can be improved in the future with more XML files and identifying more types
+    missing_types = df.loc[df["type"].isna()]
+    df["type"] = df["type"].fillna("note")
 
-print(" >> excel file generated")
-spinner.stop()
+    # remove labels from end_group
+    df.loc[df["type"] == "end_group", "label"] = ""
+
+    # remove appearence from end_group
+    df.loc[df["type"] == "end_group", "appearance"] = ""
+
+    # remove relevant from end_group
+    df.loc[df["type"] == "end_group", "relevance"] = ""
+
+    df = df.drop(0)
+
+    with pd.ExcelWriter(output_file) as writer:
+        df.to_excel(writer, sheet_name="survey", index=False)
+        df_choice.to_excel(writer, sheet_name="choices", index=False)
+
+    print(" >> excel file generated")
+
+    spinner.stop()
+
+
+if __name__ == "__main__":
+    main()
