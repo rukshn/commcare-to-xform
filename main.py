@@ -4,6 +4,7 @@ import re
 import time
 from halo import Halo
 import argparse
+from datetime import date
 
 params = {
     "lang": "en",
@@ -809,12 +810,33 @@ def main():
         "--mode", "-m", type=str, required=True, help="Mode of operation"
     )
 
+    parser.add_argument(
+        "-form_title", "-ft", type=str, required=True, help="Form title"
+    )
+
+    parser.add_argument("-form_id", "-fi", type=str, required=True, help="Form id")
+
+    parser.add_argument(
+        "-form_version", "-fv", type=str, required=False, help="Form version"
+    )
+
+    parser.add_argument(
+        "--default_language", "-dl", type=str, required=False, help="Default language"
+    )
+
     args = parser.parse_args()
 
     input_file = args.input
     output_file = args.output
     mode = args.mode
     prelab_file = args.prelab
+    form_title = args.form_title
+    form_id = args.form_id
+    if args.form_version is None:
+        form_version = date.today().strftime("%d%m%Y")
+    else:
+        form_version = args.form_version
+    default_language = args.default_language
 
     if (input_file is None) or (output_file is None):
         print(
@@ -935,6 +957,18 @@ def main():
         ignore_index=True,
     )
 
+    settings_df = pd.DataFrame()
+    settings_df = settings_df._append(
+        {
+            "form_title": form_title,
+            "form_id": form_id,
+            "version": form_version,
+            "default_language": default_language,
+            "style": "pages",
+        },
+        ignore_index=True,
+    )
+
     df = df.drop(0)
     missing_elements = missing_elements.drop(0)
     df = pd.concat([missing_elements, df], axis=0, ignore_index=True)
@@ -956,6 +990,7 @@ def main():
     with pd.ExcelWriter(output_file) as writer:
         df.to_excel(writer, sheet_name="survey", index=False)
         df_choice.to_excel(writer, sheet_name="choices", index=False)
+        settings_df.to_excel(writer, sheet_name="settings", index=False)
 
     print(" >> excel file generated")
 
