@@ -9,14 +9,30 @@
       "request": "launch",
       "name": "Parse pre-lab file",
       "program": "${file}",
-      "args": ["-i", "./input/cht.xml", "-o", "./output/cht.xlsx"]
+      "args": [
+        "-i",
+        "./input/cht.xml",
+        "-o",
+        "./output/cht.xlsx",
+        "-m",
+        "prelab"
+      ]
     },
     {
       "type": "python",
       "request": "launch",
       "name": "Process post-lab file",
       "program": "${file}",
-      "args": ["-i", "./input/postlab.xml", "-o", "./output/postlab.xlsx"]
+      "args": [
+        "-i",
+        "./input/postlab.xml",
+        "-o",
+        "./output/postlab.xlsx",
+        "-m",
+        "postLab",
+        "-p",
+        "./output/cht.xlsx"
+      ]
     }
   ]
 }

@@ -49,6 +49,10 @@ df = pd.DataFrame(
 
 df_choice = pd.DataFrame(columns=["list_name", "name", "value", "media", "read_only"])
 
+prelab_df = None
+mode = None
+missing_elements = pd.DataFrame()
+
 
 # check if the nodeset is in the dataframe
 # if it is return true else return false
@@ -126,9 +130,54 @@ and map them to the lookup table
 def parseInstance(instance):
     global lookup_table_df
     global df
+    global prelab_df
+    global missing_elements
 
     # remove the instance tag
     instnace_bak = instance
+
+    if "@case_id" in instance:
+        pattern = re.compile(r"[,:><=+) ]")
+        element = instance.split("]")[-1]
+        split_element = pattern.split(element)
+        element_key = split_element[0][1:].strip().replace("/", "_")
+        element_value = split_element[-1].strip()
+        find_prelab_element = prelab_df.loc[
+            prelab_df["label"] == element_key, "nodeset"
+        ]
+        if find_prelab_element is not None:
+            parsed_pre_lab_element = find_prelab_element
+
+            if (
+                len(
+                    missing_elements.loc[
+                        missing_elements["name"] == parsed_pre_lab_element.values[0],
+                        "name",
+                    ]
+                )
+                == 0
+            ):
+                missing_elements = missing_elements._append(
+                    {
+                        "type": "hidden",
+                        "name": parsed_pre_lab_element.values[0],
+                        "label": "NO_LABEL",
+                    },
+                    ignore_index=True,
+                )
+
+            parsed_element = re.sub(
+                r"\b" + re.escape(element_key) + r"\b",
+                "${" + find_prelab_element.values[0] + "}",
+                element[1:],
+            )
+            # parsed_element = element[1:].replace(
+            #     element_key, "${" + find_prelab_element.values[0] + "}"
+            # )
+            return parsed_element
+        else:
+            print("empty")
+
     instance = instance.strip()[8:]
     # remove the last paranthesis
     if instance.endswith(")"):
@@ -372,6 +421,38 @@ def parse_binds():
 
         # map relevant
         if bind_relevant is not None:
+            while bind_relevant.__contains__("casedb"):
+                bind_relevant_re = re.search(r"instance(.*?)(?:,|\))", bind_relevant)
+                if bind_relevant_re is not None:
+                    pattern = re.compile(r"instance\('.+?'\)/.+?\[")
+                    matches = pattern.findall(bind_relevant)
+                    split_relevant = matches[0]
+                    replace_instance_with_logic = parseInstance(
+                        bind_relevant.split("[")[1]
+                    )
+                    bind_relevant = bind_relevant.replace(
+                        split_relevant + bind_relevant.split("[")[1],
+                        replace_instance_with_logic,
+                    )
+            extract_instance_tags = bind_relevant.split(",")
+            for instance in extract_instance_tags:
+                instance_re = re.search(r"\binstance(.*?)(?:,|\))", instance)
+                if instance_re is not None:
+                    if instance.endswith(")"):
+                        bind_relevant = bind_relevant.replace(
+                            instance, replace_instance_with_logic + ")"
+                        )
+                    else:
+                        bind_relevant = bind_relevant.replace(
+                            instance, replace_instance_with_logic
+                        )
+                    if "commcare" in instance:
+                        print(
+                            f"{bcolors.WARNING}Possible commcare header: {instance}{bcolors.ENDC}"
+                        )
+                else:
+                    continue
+
             bind_relevant_regex = re.findall(r"\/[^\s=]+", bind_relevant)
             bind_relevant_regex = sorted(bind_relevant_regex, key=len, reverse=True)
             for reg in bind_relevant_regex:
@@ -425,7 +506,30 @@ def parse_binds():
         # map calculations
         bind_calculate = bind.get("calculate")
         if bind_calculate is not None:
-
+            if "weight_estimated" in bind_calculate:
+                temp = bind_calculate
+                print(
+                    f"{bcolors.WARNING}Possible weight_estimated header:{bcolors.ENDC}"
+                )
+                print(
+                    bind_calculate.replace(
+                        "weight_estimated",
+                        f"{bcolors.OKCYAN}weight_estimated{bcolors.ENDC}",
+                    )
+                )
+            while bind_calculate.__contains__("casedb"):
+                bind_calculate_re = re.search(r"instance(.*?)(?:,|\))", bind_calculate)
+                if bind_calculate_re is not None:
+                    pattern = re.compile(r"instance\('.+?'\)/.+?\[")
+                    matches = pattern.findall(bind_calculate)
+                    split_calculate = matches[0]
+                    replace_instance_with_logic = parseInstance(
+                        bind_calculate.split("[")[1]
+                    )
+                    bind_calculate = bind_calculate.replace(
+                        split_calculate + bind_calculate.split("[")[1],
+                        replace_instance_with_logic,
+                    )
             extract_instance_tags = bind_calculate.split(",")
             for instance in extract_instance_tags:
                 instance_re = re.search(r"\binstance(.*?)(?:,|\))", instance)
@@ -435,6 +539,7 @@ def parse_binds():
                     # print(
                     #     f"{bcolors.OKCYAN}{replace_instance_with_logic}{bcolors.ENDC}"
                     # )
+
                     if instance.endswith(")"):
                         bind_calculate = bind_calculate.replace(
                             instance, replace_instance_with_logic + ")"
@@ -449,7 +554,6 @@ def parse_binds():
                         )
                 else:
                     continue
-
             bind_calculate_regex = re.findall(r"\/[^\s=]+", bind_calculate)
             bind_calculate_regex = sorted(bind_calculate_regex, key=len, reverse=True)
             for reg in bind_calculate_regex:
@@ -687,6 +791,10 @@ def refine():
 def main():
     global df
     global soup
+    global prelab_df
+    global missing_elements
+    global mode
+
     parser = argparse.ArgumentParser(description="Convert CHT XML to XLSForm")
     parser.add_argument(
         "--input", "-i", type=str, required=True, help="Input file path"
@@ -694,17 +802,98 @@ def main():
     parser.add_argument(
         "--output", "-o", type=str, required=True, help="Output file path"
     )
+    parser.add_argument(
+        "--prelab", "-p", type=str, required=False, help="Prelab file path"
+    )
+    parser.add_argument(
+        "--mode", "-m", type=str, required=True, help="Mode of operation"
+    )
 
     args = parser.parse_args()
 
     input_file = args.input
     output_file = args.output
+    mode = args.mode
+    prelab_file = args.prelab
 
     if (input_file is None) or (output_file is None):
         print(
             f"{bcolors.FAIL} ERROR: Please provide input and output file paths {bcolors.ENDC}"
         )
         return
+    if mode == "postLab" and prelab_file is None:
+        print(f"{bcolors.FAIL} ERROR: Please provide prelab file path {bcolors.ENDC}")
+        return
+    elif mode == "postLab" and prelab_file is not None:
+        prelab_df = pd.read_excel(prelab_file)
+
+        missing_elements = missing_elements._append(
+            [
+                {"type": "hidden", "name": "data"},
+                {
+                    "type": "begin_group",
+                    "name": "inputs",
+                    "label": "NO_LABEL",
+                    "appearance": "field-list",
+                    "relevance": "./source='user'",
+                },
+                {
+                    "type": "hidden",
+                    "name": "data_load",
+                },
+                {
+                    "type": "integer",
+                    "name": "hidden_int",
+                    "relevance": "false()",
+                    "label": "NO_LABEL",
+                },
+                {
+                    "type": "hidden",
+                    "name": "source",
+                    "default": "user",
+                    "appearance": "hidden",
+                },
+                {"type": "hidden", "name": "source_id", "relevance": "hidden"},
+                {
+                    "type": "begin_group",
+                    "name": "user",
+                    "label": "NO_LABEL",
+                },
+                {
+                    "type": "string",
+                    "name": "contract_id",
+                    "label": "NO_LABEL",
+                },
+                {
+                    "type": "string",
+                    "name": "facility_id",
+                    "label": "NO_LABEL",
+                },
+                {"type": "string", "name": "name", "label": "NO_LABEL"},
+                {"type": "end_group", "name": "user"},
+                {
+                    "type": "hidden",
+                    "name": "person_uuid",
+                },
+                {"type": "hidden", "name": "person_name"},
+                {"type": "hidden", "name": "person_role"},
+                {"type": "hidden", "name": "patient_uuid"},
+                {"type": "begin_group", "name": "contact", "label": "NO_LABEL"},
+                {"type": "string", "name": "_id", "label": "NO_LABEL"},
+                {"type": "end_group", "name": "contact"},
+                {
+                    "type": "calculate",
+                    "name": "source_id",
+                    "calculation": "../inputs/source_id",
+                },
+                {
+                    "type": "calculate",
+                    "name": "patient_uuid",
+                    "calculation": "../inputs/patient_uuid",
+                },
+            ],
+            ignore_index=True,
+        )
 
     # read the xml file and populate variable
     xml = ""
@@ -732,6 +921,18 @@ def main():
     refine()
     print(" >> refine dataframe")
 
+    missing_elements = missing_elements._append(
+        {
+            "type": "end_group",
+            "name": "inputs",
+        },
+        ignore_index=True,
+    )
+
+    df = df.drop(0)
+    missing_elements = missing_elements.drop(0)
+    df = pd.concat([missing_elements, df], axis=0, ignore_index=True)
+
     # currently this assumes that all non types are notes, but this may not be the case all the tie
     # but for this CHT form it works, maybe this can be improved in the future with more XML files and identifying more types
     missing_types = df.loc[df["type"].isna()]
@@ -745,8 +946,6 @@ def main():
 
     # remove relevant from end_group
     df.loc[df["type"] == "end_group", "relevance"] = ""
-
-    df = df.drop(0)
 
     with pd.ExcelWriter(output_file) as writer:
         df.to_excel(writer, sheet_name="survey", index=False)
