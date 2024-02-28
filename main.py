@@ -345,7 +345,7 @@ def traverse(t, current_path=None):
                         "relevance": "",
                         "calculation": "",
                         "choice_filter": "",
-                        "appearance": "",
+                        "appearance": "field-list",
                         "media": "",
                         "read_only": "",
                         "node_set": "",
@@ -857,6 +857,7 @@ def main():
                 {
                     "type": "begin_group",
                     "name": "user",
+                    "appearance": "field-list",
                     "label": "NO_LABEL",
                 },
                 {
@@ -878,7 +879,12 @@ def main():
                 {"type": "hidden", "name": "person_name"},
                 {"type": "hidden", "name": "person_role"},
                 {"type": "hidden", "name": "patient_uuid"},
-                {"type": "begin_group", "name": "contact", "label": "NO_LABEL"},
+                {
+                    "type": "begin_group",
+                    "appearence": "field-list",
+                    "name": "contact",
+                    "label": "NO_LABEL",
+                },
                 {"type": "string", "name": "_id", "label": "NO_LABEL"},
                 {"type": "end_group", "name": "contact"},
                 {
