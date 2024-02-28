@@ -743,8 +743,9 @@ def fill_labels():
         column_name = "label" + "::" + translation_lang
 
         for text in translation.find_all("text"):
+            if ":jr:constraintMsg" in text.get("id"):
+                continue
             text_content = text.contents
-
             text_id = text.get("id")
             text_id_regex = re.findall(r"\/[^\s=':)]+", text_id)
             text_id_to_name = "_".join(text_id_regex[0].split("/")[1:])
