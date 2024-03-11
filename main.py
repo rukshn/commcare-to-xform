@@ -1,7 +1,8 @@
 from bs4 import BeautifulSoup
+import numpy as np
+from string import Template
 import pandas as pd
 import re
-import time
 from halo import Halo
 import argparse
 from datetime import date
@@ -55,6 +56,31 @@ mode = None
 missing_elements = pd.DataFrame()
 
 
+def get_tasksstrings(hidden_names, df_survey):
+    task_string_template = "content['{variableName}'] = getField(report, '{full_path}')"
+    task_strings = {}
+    for index, row in hidden_names.iterrows():
+        if row["nodeset_unparsed"] is np.nan:
+            continue
+        unparsed = row["nodeset_unparsed"]
+        split_unparsed = unparsed.split("/")
+        parse_unparsed = ".".join(
+            split_unparsed[1:-1]
+        )  # remove the first and last element
+        if parse_unparsed == "":
+            full_path = row["name"]  # add the name to the end of the path
+        else:
+            full_path = (
+                parse_unparsed + "." + row["name"]
+            )  # add the name to the end of the path
+        task_string = task_string_template.format(
+            variableName=row["name"], full_path=full_path
+        )
+        task_strings[row["name"]] = task_string
+
+    return list(task_strings.values())
+
+
 # check if the nodeset is in the dataframe
 # if it is return true else return false
 def check_nodeset_in_df(nodeset):
@@ -78,7 +104,6 @@ def loadLookupTables():
     for sheet, df in lookup_table.items():
         df["sheet"] = sheet
         dfs_with_sheet_names.append(df)
-
     lookup_table_df = pd.concat(dfs_with_sheet_names, ignore_index=True)
 
 
@@ -142,12 +167,18 @@ def parseInstance(instance):
         element = instance.split("]")[-1]
         split_element = pattern.split(element)
         element_key = split_element[0][1:].strip().replace("/", "_")
-        element_value = split_element[-1].strip()
+        if prelab_df is None:
+            return
+
         find_prelab_element = prelab_df.loc[
             prelab_df["label"] == element_key, "nodeset"
         ]
+
         if find_prelab_element is not None:
             parsed_pre_lab_element = find_prelab_element
+            unparsed_notdeset = prelab_df.loc[
+                prelab_df["label"] == element_key, "nodeset_unparsed"
+            ]
 
             if (
                 len(
@@ -162,6 +193,7 @@ def parseInstance(instance):
                     {
                         "type": "hidden",
                         "name": parsed_pre_lab_element.values[0],
+                        "nodeset_unparsed": unparsed_notdeset.values[0],
                         "label": "NO_LABEL",
                     },
                     ignore_index=True,
@@ -414,9 +446,11 @@ def parse_binds():
     binds = soup.find_all("bind")
     for bind in binds:
         nodeset = bind.get("nodeset")[1:]
+        nodeset_unparsed = nodeset
         nodeset = "_".join(nodeset.split("/"))
         # print(nodeset)
         df.loc[df["name"] == nodeset, "nodeset"] = nodeset
+        df.loc[df["name"] == nodeset, "nodeset_unparsed"] = nodeset_unparsed
         df.loc[df["name"] == nodeset, "required"] = bind.get("required")
         bind_relevant = bind.get("relevant")
 
@@ -600,10 +634,18 @@ def parse_binds():
         bind_type = bind.get("type")
         if bind_type is not None and "string" in bind_type:
             df.loc[df["name"] == nodeset, "type"] = "string"
-        if bind_type is not None and "int" in bind_type:
+        elif bind_type is not None and "int" in bind_type:
             df.loc[df["name"] == nodeset, "type"] = "integer"
-        if bind_type is not None and "double" in bind_type:
+        elif bind_type is not None and "double" in bind_type:
             df.loc[df["name"] == nodeset, "type"] = "decimal"
+        elif bind_type is not None and "dateTime" in bind_type:
+            df.loc[df["name"] == nodeset, "type"] = "dateTime"
+        elif bind_type is not None and "date" in bind_type:
+            df.loc[df["name"] == nodeset, "type"] = "date"
+        elif bind_type is not None and "geopoint" in bind_type:
+            df.loc[df["name"] == nodeset, "type"] = "geopoint"
+        elif bind_type is not None and "geotrace" in bind_type:
+            df.loc[df["name"] == nodeset, "type"] = "geotrace"
 
 
 def parse_body():
@@ -994,6 +1036,14 @@ def main():
         settings_df.to_excel(writer, sheet_name="settings", index=False)
 
     print(" >> excel file generated")
+
+    if (mode == "postLab") and (prelab_file is not None):
+        tasks_strings = get_tasksstrings(missing_elements, prelab_df)
+        print(" >> tasks strings generated")
+        with open("./output/tasks.js", "w") as file:
+            for task in tasks_strings:
+                file.write(task + "\n")
+        print(" >> tasks.js file generated")
 
     spinner.stop()
 
