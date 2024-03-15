@@ -29,8 +29,12 @@ The python script won't be 100% acurate in converting, but it will be able to ge
 ### Usefull links
 
 - CommCare form structure specification - https://dimagi.github.io/xform-spec/
+- XLSFORM documentation - https://xlsform.org/en/
 
 ### Updates
 
 - First XLS to XLSX (Excel) was done on 22/02/2024 ⚛️ - But far from perfect.
 - Ability to parse multiple languages | 23/02/2024
+- Add support to generating CHT taskJS file to connect consultations - 11/03/2024 🌟
+- MageAI pipeline based on Alchemy - 15/03/2024 🌟 [Mage Pipeline](https://github.com/rukshn/mage-alchemy)
+
